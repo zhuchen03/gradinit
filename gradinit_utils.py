@@ -1,68 +1,106 @@
 import torch
 from torch import nn
 from gradinit_optimizers import RescaleAdam
-from gradinit_modules import GradInitConv2d, GradInitLinear, GradInitBatchNorm2d, GradInitBias, GradInitScale
+from models.modules import Scale, Bias
 import numpy as np
 import os
-import pdb
 
 
 def get_ordered_params(net):
     param_list = []
     for m in net.modules():
-        if isinstance(m, GradInitConv2d) or isinstance(m, GradInitLinear) or isinstance(m, GradInitBatchNorm2d):
+        if isinstance(m, nn.Conv2d) or isinstance(m, nn.Linear) or isinstance(m, nn.BatchNorm2d):
             param_list.append(m.weight)
             if m.bias is not None:
                 param_list.append(m.bias)
-        elif isinstance(m, GradInitScale):
+        elif isinstance(m, Scale):
             param_list.append(m.weight)
-        elif isinstance(m, GradInitBias):
+        elif isinstance(m, Bias):
             param_list.append(m.bias)
 
     return param_list
 
 
-def take_opt_step(net, grad_list, opt='sgd', trust=0.1):
+def set_param(module, name, alg, eta, grad):
+    weight = getattr(module, name)
+    # remove this parameter from parameter list
+    del module._parameters[name]
+
+    # compute the update steps according to the optimizers
+    if alg.lower() == 'sgd':
+        gstep = eta * grad
+    elif alg.lower() == 'adam':
+        gstep = eta * grad.sign()
+    else:
+        raise RuntimeError("Optimization algorithm {} not defined!".format(alg))
+
+    # add the updated parameter as the new parameter
+    module.register_parameter(name + '_prev', weight)
+
+    # recompute weight before every forward()
+    updated_weight = weight - gstep.data
+    setattr(module, name, updated_weight)
+
+
+def take_opt_step(net, grad_list, alg='sgd', eta=0.1):
     """Take the initial step of the chosen optimizer.
     """
-    assert opt.lower() in ['adam', 'sgd']
+    assert alg.lower() in ['adam', 'sgd']
 
     idx = 0
     for n, m in net.named_modules():
-        if isinstance(m, GradInitConv2d) or isinstance(m, GradInitLinear) or isinstance(m, GradInitBatchNorm2d):
+        if isinstance(m, nn.Conv2d) or isinstance(m, nn.Linear) or isinstance(m, nn.BatchNorm2d):
             grad = grad_list[idx]
-            if opt.lower() == 'sgd':
-                m.opt_weight = m.weight - trust * grad.detach()
-            elif opt.lower() == 'adam':
-                m.opt_weight = m.weight - trust * grad.sign()
+            set_param(m, 'weight', alg, eta, grad)
             idx += 1
 
             if m.bias is not None:
                 grad = grad_list[idx]
-                if opt.lower() == 'sgd':
-                    m.opt_bias = m.bias - trust * grad.detach()
-                elif opt.lower() == 'adam':
-                    m.opt_bias = m.bias - trust * grad.sign().detach()
+                set_param(m, 'bias', alg, eta, grad)
                 idx += 1
-            else:
-                m.opt_bias = None
-        elif isinstance(m, GradInitScale):
-            tr = trust
+        elif isinstance(m, Scale):
             grad = grad_list[idx]
-            if opt.lower() == 'sgd':
-                m.opt_weight = m.weight - tr * grad.detach()
-            elif opt.lower() == 'adam':
-                m.opt_weight = m.weight - tr * grad.sign().detach()
+            set_param(m, 'weight', alg, eta, grad)
             idx += 1
-            # print(n, m.opt_weight.sum())
-        elif isinstance(m, GradInitBias):
-            tr = trust
+        elif isinstance(m, Bias):
             grad = grad_list[idx]
-            if opt.lower() == 'sgd':
-                m.opt_bias = m.bias - tr * grad.detach()
-            elif opt.lower() == 'adam':
-                m.opt_bias = m.bias - tr * grad.sign().detach()
+            set_param(m, 'bias', alg, eta, grad)
             idx += 1
+
+
+def recover_params(net):
+    """Reset the weights to the original values without the gradient step
+    """
+
+    def recover_param_(module, name):
+        delattr(module, name)
+        setattr(module, name, getattr(module, name + '_prev'))
+        del module._parameters[name + '_prev']
+
+    for n, m in net.named_modules():
+        if isinstance(m, nn.Conv2d) or isinstance(m, nn.Linear) or isinstance(m, nn.BatchNorm2d):
+            recover_param_(m, 'weight')
+            if m.bias is not None:
+                recover_param_(m, 'bias')
+        elif isinstance(m, Scale):
+            recover_param_(m, 'weight')
+        elif isinstance(m, Bias):
+            recover_param_(m, 'bias')
+
+
+def set_bn_modes(net):
+    """Switch the BN layers into training mode, but does not track running stats.
+    """
+    for n, m in net.named_modules():
+        if isinstance(m, nn.BatchNorm2d):
+            m.training = True
+            m.track_running_stats = False
+
+
+def recover_bn_modes(net):
+    for n, m in net.named_modules():
+        if isinstance(m, nn.BatchNorm2d):
+            m.track_running_stats = True
 
 
 def get_scale_stats(model, optimizer):
@@ -103,10 +141,10 @@ def gradinit(net, dataloader, args):
         net.load_state_dict(sdict)
         return
 
-    if isinstance(net, torch.nn.DataParallel):
-        net_top = net.module
-    else:
-        net_top = net
+    # if isinstance(net, torch.nn.DataParallel):
+    #     net_top = net.module
+    # else:
+    #     net_top = net
 
     bias_params = [p for n, p in net.named_parameters() if 'bias' in n]
     weight_params = [p for n, p in net.named_parameters() if 'weight' in n]
@@ -117,10 +155,10 @@ def gradinit(net, dataloader, args):
 
     criterion = nn.CrossEntropyLoss()
 
-    net_top.gradinit(True) # This will switch the BNs in to training mode
     net.eval() # This further shuts down dropout, if any.
-    # get all the parameters by order
-    params_list = get_ordered_params(net)
+
+    set_bn_modes(net) # Should be called after net.eval()
+
 
     total_loss, total_l0, total_l1, total_residual, total_gnorm = 0, 0, 0, 0, 0
     total_sums, total_sums_gnorm = 0, 0
@@ -128,6 +166,8 @@ def gradinit(net, dataloader, args):
     total_iters = 0
     obj_loss, updated_loss, residual = -1, -1, -1
     data_iter = iter(dataloader)
+    # get all the parameters by order
+    params_list = get_ordered_params(net)
     while True:
         eta = args.gradinit_eta
 
@@ -143,6 +183,7 @@ def gradinit(net, dataloader, args):
         # compute the gradient and take one step
         outputs = net(init_inputs)
         init_loss = criterion(outputs, init_targets)
+
         all_grads = torch.autograd.grad(init_loss, params_list, create_graph=True)
 
         # Compute the loss w.r.t. the optimizer
@@ -169,7 +210,7 @@ def gradinit(net, dataloader, args):
             cs_count += 1
         else:
             # take one optimization step
-            take_opt_step(net, loss_grads, opt=args.gradinit_alg, trust=eta)
+            take_opt_step(net, loss_grads, alg=args.gradinit_alg, eta=eta)
 
             total_l0 += init_loss.item()
 
@@ -181,14 +222,15 @@ def gradinit(net, dataloader, args):
             updated_targets = torch.cat([init_targets_0, targets_2])
 
             # compute loss using the updated network
-            net_top.opt_mode(True)
+            # net_top.opt_mode(True)
             updated_outputs = net(updated_inputs)
-            net_top.opt_mode(False)
+            # net_top.opt_mode(False)
             updated_loss = criterion(updated_outputs, updated_targets)
 
             # If eta is larger, we should expect obj_loss to be even smaller.
             obj_loss = updated_loss / eta
 
+            recover_params(net)
             optimizer.zero_grad()
             obj_loss.backward()
             optimizer.step(is_constraint=False)
@@ -215,7 +257,7 @@ def gradinit(net, dataloader, args):
         if total_iters == args.gradinit_iters:
             break
 
-    net_top.gradinit(False)
+    recover_bn_modes(net)
     if not os.path.exists('chks'):
         os.makedirs('chks')
     torch.save(net.state_dict(), 'chks/{}_init.pth'.format(args.expname))
@@ -255,7 +297,7 @@ def metainit(net, dataloader, args, experiment=None):
 
     criterion = nn.CrossEntropyLoss()
 
-    net_top.gradinit(True)
+    set_bn_modes(net)
     net.eval()
     # get all the parameters by order
     params_list = get_ordered_params(net)
@@ -293,7 +335,9 @@ def metainit(net, dataloader, args, experiment=None):
                 print_str += "{}: {:.2e}\t".format(key, val)
             print(print_str)
 
-    net_top.gradinit(False)
+    recover_bn_modes(net)
     if not os.path.exists('chks'):
         os.makedirs('chks')
     torch.save(net.state_dict(), 'chks/{}_init.pth'.format(args.expname))
+
+

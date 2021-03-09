@@ -6,7 +6,6 @@ import torch
 import torch.nn.functional as F
 import torch.utils.checkpoint as cp
 from collections import OrderedDict
-from gradinit_modules import GradInitBatchNorm2d, GradInitLinear, GradInitConv2d
 
 __all__ = ['densenet100']
 
@@ -28,15 +27,15 @@ class _DenseLayer(torch.nn.Module):
     def __init__(self, num_input_features, growth_rate, bn_size, drop_rate, efficient=False, use_bn=True):
         super(_DenseLayer, self).__init__()
         if use_bn:
-            self.add_module('norm1', GradInitBatchNorm2d(num_input_features)),
+            self.add_module('norm1', torch.nn.BatchNorm2d(num_input_features)),
         self.add_module('relu1', torch.nn.ReLU(inplace=True)),
-        self.add_module('conv1', GradInitConv2d(num_input_features, bn_size * growth_rate,
-                                                kernel_size=1, stride=1, bias=not use_bn)),
+        self.add_module('conv1', torch.nn.Conv2d(num_input_features, bn_size * growth_rate,
+                                                 kernel_size=1, stride=1, bias=not use_bn)),
         if use_bn:
-            self.add_module('norm2', GradInitBatchNorm2d(bn_size * growth_rate)),
+            self.add_module('norm2', torch.nn.BatchNorm2d(bn_size * growth_rate)),
         self.add_module('relu2', torch.nn.ReLU(inplace=True)),
-        self.add_module('conv2', GradInitConv2d(bn_size * growth_rate, growth_rate,
-                                                kernel_size=3, stride=1, padding=1, bias=not use_bn)),
+        self.add_module('conv2', torch.nn.Conv2d(bn_size * growth_rate, growth_rate,
+                                                 kernel_size=3, stride=1, padding=1, bias=not use_bn)),
         self.drop_rate = drop_rate
         self.efficient = efficient
         self.use_bn = use_bn
@@ -59,39 +58,18 @@ class _DenseLayer(torch.nn.Module):
             new_features = F.dropout(new_features, p=self.drop_rate, training=self.training)
         return new_features
 
-    def gradinit(self, mode=True):
-        if self.use_bn:
-            self.norm1.gradinit(mode)
-            self.norm2.gradinit(mode)
-
-    def opt_mode(self, mode=True):
-        if self.use_bn:
-            self.norm1.opt_mode(mode)
-            self.norm2.opt_mode(mode)
-        self.conv1.opt_mode(mode)
-        self.conv2.opt_mode(mode)
-
 
 class _Transition(torch.nn.Sequential):
     def __init__(self, num_input_features, num_output_features, use_bn=True):
         super(_Transition, self).__init__()
         if use_bn:
-            self.add_module('norm', GradInitBatchNorm2d(num_input_features))
+            self.add_module('norm', torch.nn.BatchNorm2d(num_input_features))
         self.use_bn = use_bn
         self.add_module('relu', torch.nn.ReLU(inplace=True))
-        self.add_module('conv', GradInitConv2d(num_input_features, num_output_features,
-                                               kernel_size=1, stride=1, bias=not use_bn))
+        self.add_module('conv', torch.nn.Conv2d(num_input_features, num_output_features,
+                                                kernel_size=1, stride=1, bias=not use_bn))
         self.add_module('pool', torch.nn.AvgPool2d(kernel_size=2, stride=2))
         self.gradinit_ = False
-
-    def gradinit(self, mode=True):
-        if self.use_bn:
-            self.norm.gradinit(mode)
-
-    def opt_mode(self, mode=True):
-        if self.use_bn:
-            self.norm.opt_mode(mode)
-        self.conv.opt_mode(mode)
 
 
 class _DenseBlock(torch.nn.Module):
@@ -114,14 +92,6 @@ class _DenseBlock(torch.nn.Module):
             new_features = layer(*features)
             features.append(new_features)
         return torch.cat(features, 1)
-
-    def gradinit(self, mode):
-        for name, layer in self.named_children():
-            layer.gradinit(mode)
-
-    def opt_mode(self, mode=True):
-        for name, layer in self.named_children():
-            layer.opt_mode(mode)
 
 
 class GradInitDenseNet(torch.nn.Module):
@@ -150,14 +120,14 @@ class GradInitDenseNet(torch.nn.Module):
         # First convolution
         if small_inputs:
             self.features = torch.nn.Sequential(OrderedDict([
-                ('conv0', GradInitConv2d(3, num_init_features, kernel_size=3, stride=1, padding=1, bias=not use_bn)),
+                ('conv0', torch.nn.Conv2d(3, num_init_features, kernel_size=3, stride=1, padding=1, bias=not use_bn)),
             ]))
         else:
             self.features = torch.nn.Sequential(OrderedDict([
-                ('conv0', GradInitConv2d(3, num_init_features, kernel_size=7, stride=2, padding=3, bias=not use_bn)),
+                ('conv0', torch.nn.Conv2d(3, num_init_features, kernel_size=7, stride=2, padding=3, bias=not use_bn)),
             ]))
             if not no_bn:
-                self.features.add_module('norm0', GradInitBatchNorm2d(num_init_features))
+                self.features.add_module('norm0', torch.nn.BatchNorm2d(num_init_features))
             self.features.add_module('relu0', torch.nn.ReLU(inplace=True))
             self.features.add_module('pool0', torch.nn.MaxPool2d(kernel_size=3, stride=2, padding=1,
                                                            ceil_mode=False))
@@ -185,10 +155,10 @@ class GradInitDenseNet(torch.nn.Module):
 
         # Final batch norm
         if not no_bn:
-            self.features.add_module('norm_final', GradInitBatchNorm2d(num_features))
+            self.features.add_module('norm_final', torch.nn.BatchNorm2d(num_features))
 
         # Linear layer
-        self.classifier = GradInitLinear(num_features, num_classes)
+        self.classifier = torch.nn.Linear(num_features, num_classes)
 
         # Initialization
         if not use_pt_init:
@@ -210,19 +180,6 @@ class GradInitDenseNet(torch.nn.Module):
         if init_multip != 1:
             for param in self.parameters():
                 param.data *= init_multip
-
-    def gradinit(self, mode):
-        for name, layer in self.features.named_children():
-            if 'norm' in name or 'denseblock' in name or 'transition' in name:
-                layer.gradinit(mode)
-
-    def opt_mode(self, mode=True):
-        captured_names = []
-        for name, layer in self.features.named_children():
-            if 'norm' in name or 'conv' in name or 'denseblock' in name or 'transition' in name or 'classifier' in name:
-                layer.opt_mode(mode)
-                captured_names.append(name)
-        self.classifier.opt_mode(mode)
 
     def get_plotting_names(self):
         bn_names, conv_names = [], []

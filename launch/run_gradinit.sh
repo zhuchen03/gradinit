@@ -31,6 +31,6 @@ eval ${cmd}
 # runexp  gpu    arch    alg   glr   iters    flags
 runexp     0    vgg19    sgd   1e-2    390    "--no_bn --train-clip 1 --seed 4096"
 runexp     0    vgg19    sgd   1e-1    390    "--seed 4096"
-
+#
 runexp     0 resnet110   sgd   5e-2    390    "--no_bn --train-clip 1 --seed 4096"
 runexp     0 resnet110   sgd   1e-3    390    "--seed 4096"

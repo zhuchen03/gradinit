@@ -1,14 +1,13 @@
 import torch
 import torch.nn.functional as F
 from torch.autograd import Variable
-from models import GradInitConv2d, GradInitBatchNorm2d, GradInitLinear
 import itertools
 
 __all__ = ['wrn_28_10']
 
 
 def conv3x3(in_planes, out_planes, stride=1):
-    return GradInitConv2d(in_planes, out_planes, kernel_size=3, stride=stride, padding=1, bias=True)
+    return torch.nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride, padding=1, bias=True)
 
 
 class wide_basic(torch.nn.Module):
@@ -17,21 +16,21 @@ class wide_basic(torch.nn.Module):
 
         self.use_bn = use_bn
         if self.use_bn:
-            self.bn1 = GradInitBatchNorm2d(in_planes)
-            self.bn2 = GradInitBatchNorm2d(planes)
+            self.bn1 = torch.nn.BatchNorm2d(in_planes)
+            self.bn2 = torch.nn.BatchNorm2d(planes)
         else:
             # use placeholders
             self.bn1 = torch.nn.Sequential()
             self.bn2 = torch.nn.Sequential()
 
-        self.conv1 = GradInitConv2d(in_planes, planes, kernel_size=3, padding=1, bias=True)
+        self.conv1 = torch.nn.Conv2d(in_planes, planes, kernel_size=3, padding=1, bias=True)
         self.dropout = torch.nn.Dropout(p=dropout_rate)
-        self.conv2 = GradInitConv2d(planes, planes, kernel_size=3, stride=stride, padding=1, bias=True)
+        self.conv2 = torch.nn.Conv2d(planes, planes, kernel_size=3, stride=stride, padding=1, bias=True)
 
         self.shortcut = torch.nn.Sequential()
         if stride != 1 or in_planes != planes:
             self.shortcut = torch.nn.Sequential(
-                GradInitConv2d(in_planes, planes, kernel_size=1, stride=stride, bias=True),
+                torch.nn.Conv2d(in_planes, planes, kernel_size=1, stride=stride, bias=True),
             )
 
     def forward(self, x):
@@ -40,20 +39,6 @@ class wide_basic(torch.nn.Module):
         out += self.shortcut(x)
 
         return out
-
-    def gradinit(self, mode=True):
-        if self.use_bn:
-            self.bn1.gradinit(mode)
-            self.bn2.gradinit(mode)
-
-    def opt_mode(self, mode=True):
-        self.conv1.opt_mode(mode)
-        self.conv2.opt_mode(mode)
-        if self.use_bn:
-            self.bn1.opt_mode(mode)
-            self.bn2.opt_mode(mode)
-            if len(self.shortcut) > 0:
-                self.shortcut[0].opt_mode(mode)
 
 
 class Wide_ResNet(torch.nn.Module):
@@ -75,10 +60,10 @@ class Wide_ResNet(torch.nn.Module):
         self.layer2 = self._wide_layer(wide_basic, nStages[2], n, dropout_rate, stride=2)
         self.layer3 = self._wide_layer(wide_basic, nStages[3], n, dropout_rate, stride=2)
         if self.use_bn:
-            self.bn1 = GradInitBatchNorm2d(nStages[3], momentum=0.9)
+            self.bn1 = torch.nn.BatchNorm2d(nStages[3], momentum=0.9)
         else:
             self.bn1 = torch.nn.Sequential()
-        self.linear = GradInitLinear(nStages[3], num_classes)
+        self.linear = torch.nn.Linear(nStages[3], num_classes)
 
     def _wide_layer(self, block, planes, num_blocks, dropout_rate, stride):
         strides = [stride] + [1]*(int(num_blocks)-1)
@@ -101,20 +86,6 @@ class Wide_ResNet(torch.nn.Module):
         out = self.linear(out)
 
         return out
-
-    def gradinit(self, mode=True):
-        if self.use_bn:
-            self.bn1.gradinit(mode)
-            for layer in itertools.chain(self.layer1, self.layer2, self.layer3):
-                layer.gradinit(mode)
-
-    def opt_mode(self, mode=True):
-        self.conv1.opt_mode(mode)
-        for layer in itertools.chain(self.layer1, self.layer2, self.layer3):
-            layer.opt_mode(mode)
-        self.linear.opt_mode(mode)
-        if self.use_bn:
-            self.bn1.opt_mode(mode)
 
 
 def wrn_28_10(**kwargs):

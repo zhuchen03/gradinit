@@ -23,8 +23,8 @@ from utils import Cutout, mixup_criterion, mixup_data
 
 
 model_names = sorted(name for name in models.__dict__
-    if name.islower() and not name.startswith("__")
-    and callable(models.__dict__[name]))
+                     if name.islower() and not name.startswith("__")
+                     and callable(models.__dict__[name]))
 
 parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
 parser.add_argument('-a', '--arch', metavar='ARCH', default='gradinit_resnet110', choices=model_names,
@@ -57,7 +57,7 @@ parser.add_argument('--gradinit', default=False, action='store_true',
                     help='Whether to use GradInit.')
 parser.add_argument('--gradinit-lr', default=1e-3, type=float,
                     help='The learning rate of GradInit.')
-parser.add_argument('--gradinit-iters', default=1170, type=int,
+parser.add_argument('--gradinit-iters', default=390, type=int,
                     help='Total number of iterations for GradInit.')
 parser.add_argument('--gradinit-alg', default='sgd', type=str,
                     help='The target optimization algorithm, deciding the direction of the first gradient step.')

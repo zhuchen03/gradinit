@@ -1,6 +1,5 @@
 '''VGG11/13/16/19 in Pytorch.'''
 import torch
-from gradinit_modules import GradInitConv2d, GradInitBatchNorm2d, GradInitLinear
 from collections import OrderedDict
 
 cfg = {
@@ -18,21 +17,21 @@ class VGG(torch.nn.Module):
         self.conv_names = []
         self.bn_names = []
         self._make_layers(cfg[vgg_name])
-        self.classifier = GradInitLinear(512, 10)
+        self.classifier = torch.nn.Linear(512, 10)
         self.conv_names.append(f'module.classifier.weight')
         if not use_pt_init:
             self._initialize_weights()
 
         if init_multip != 1:
             for m in self.modules():
-                if isinstance(m, GradInitConv2d):
+                if isinstance(m, torch.nn.Conv2d):
                     m.weight.data *= init_multip
                     if m.bias is not None:
                         m.bias.data *= init_multip
-                elif isinstance(m, GradInitBatchNorm2d):
+                elif isinstance(m, torch.nn.BatchNorm2d):
                     m.weight.data *= init_multip
                     m.bias.data *= init_multip
-                elif isinstance(m, GradInitLinear):
+                elif isinstance(m, torch.nn.Linear):
                     m.weight.data *= init_multip
                     m.bias.data *= init_multip
 
@@ -52,9 +51,9 @@ class VGG(torch.nn.Module):
                 self.features.add_module(f'pool{pool_num}', torch.nn.MaxPool2d(kernel_size=2, stride=2))
                 pool_num += 1
             else:
-                self.features.add_module(f'conv{block_num}', GradInitConv2d(in_channels, x, kernel_size=3, padding=1))
+                self.features.add_module(f'conv{block_num}', torch.nn.Conv2d(in_channels, x, kernel_size=3, padding=1))
                 if self.use_bn:
-                    self.features.add_module(f'bn{block_num}', GradInitBatchNorm2d(x))
+                    self.features.add_module(f'bn{block_num}', torch.nn.BatchNorm2d(x))
                 self.features.add_module(f'relu{block_num}', torch.nn.ReLU(inplace=True))
                 in_channels = x
                 self.conv_names.append(f'module.features.conv{block_num}.weight')
@@ -63,31 +62,18 @@ class VGG(torch.nn.Module):
 
         self.add_module('global_pool', torch.nn.AvgPool2d(kernel_size=1, stride=1))
 
-
-    def gradinit(self, mode=True):
-        for name, layer in self.features.named_children():
-            if 'bn' in name:
-                layer.gradinit(mode)
-
-    def opt_mode(self, mode=True):
-        for name, layer in self.features.named_children():
-            if 'norm' in name or 'conv' in name:
-                layer.opt_mode(mode)
-        self.classifier.opt_mode(mode)
-
     def _initialize_weights(self) -> None:
         for m in self.modules():
-            if isinstance(m, GradInitConv2d):
+            if isinstance(m, torch.nn.Conv2d):
                 torch.nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
                 if m.bias is not None:
                     torch.nn.init.constant_(m.bias, 0)
-            elif isinstance(m, GradInitBatchNorm2d):
+            elif isinstance(m, torch.nn.BatchNorm2d):
                 torch.nn.init.constant_(m.weight, 1)
                 torch.nn.init.constant_(m.bias, 0)
-            elif isinstance(m, GradInitLinear):
+            elif isinstance(m, torch.nn.Linear):
                 torch.nn.init.normal_(m.weight, 0, 0.01)
                 torch.nn.init.constant_(m.bias, 0)
-
 
     def get_plotting_names(self):
         if self.use_bn:
@@ -101,9 +87,6 @@ def test():
     x = torch.randn(2,3,32,32)
     y = net(x)
     print(y.size())
-
-# test()
-
 
 def vgg11(**kwargs):
     return VGG('VGG11', **kwargs)

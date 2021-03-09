@@ -1,50 +1,39 @@
 import torch
 # import torch.nn as nn
 import numpy as np
-from gradinit_modules import GradInitConv2d, GradInitLinear, GradInitScale, GradInitBias
+from .modules import Scale, Bias
 import itertools
-import pdb
 
-
-__all__ = ['GradInitFixUpResNet', 'fixup_resnet20', 'fixup_resnet32', 'fixup_resnet44',
+__all__ = ['FixUpResNet', 'fixup_resnet20', 'fixup_resnet32', 'fixup_resnet44',
            'fixup_resnet56', 'fixup_resnet110', 'fixup_resnet1202']
 
 
 def conv3x3(in_planes, out_planes, stride=1):
     """3x3 convolution with padding"""
-    return GradInitConv2d(in_planes, out_planes, kernel_size=3, stride=stride,
+    return torch.nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride,
                           padding=1, bias=False)
 
 
-class GradInitNoBNBasicBlock(torch.nn.Module):
+class NoBNBasicBlock(torch.nn.Module):
     expansion = 1
 
     def __init__(self, inplanes, planes, stride=1, downsample=None):
-        super(GradInitNoBNBasicBlock, self).__init__()
+        super(NoBNBasicBlock, self).__init__()
         # Both self.conv1 and self.downsample layers downsample the input when stride != 1
         # self.bias1a = nn.Parameter(torch.zeros(1))
-        self.bias1a = GradInitBias()
+        self.bias1a = Bias()
         self.conv1 = conv3x3(inplanes, planes, stride)
         # self.bias1b = nn.Parameter(torch.zeros(1))
-        self.bias1b = GradInitBias()
+        self.bias1b = Bias()
         self.relu = torch.nn.ReLU(inplace=True)
         # self.bias2a = nn.Parameter(torch.zeros(1))
-        self.bias2a = GradInitBias()
+        self.bias2a = Bias()
         self.conv2 = conv3x3(planes, planes)
         # self.scale = nn.Parameter(torch.ones(1))
-        self.scale = GradInitScale()
+        self.scale = Scale()
         # self.bias2b = nn.Parameter(torch.zeros(1))
-        self.bias2b = GradInitBias()
+        self.bias2b = Bias()
         self.downsample = downsample
-
-    def opt_mode(self, mode):
-        self.bias1a.opt_mode(mode)
-        self.conv1.opt_mode(mode)
-        self.bias1b.opt_mode(mode)
-        self.bias2a.opt_mode(mode)
-        self.conv2.opt_mode(mode)
-        self.scale.opt_mode(mode)
-        self.bias2b.opt_mode(mode)
 
     def forward(self, x):
         identity = x
@@ -70,26 +59,26 @@ class GradInitNoBNBasicBlock(torch.nn.Module):
         return out
 
 
-class GradInitFixUpResNet(torch.nn.Module):
+class FixUpResNet(torch.nn.Module):
 
     def __init__(self, block, layers, num_classes=10, **kwargs):
-        super(GradInitFixUpResNet, self).__init__()
+        super(FixUpResNet, self).__init__()
         self.num_layers = sum(layers)
         self.inplanes = 16
         self.conv1 = conv3x3(3, 16)
         # self.bias1 = torch.nn.Parameter(torch.zeros(1))
-        self.bias1 = GradInitBias()
+        self.bias1 = Bias()
         self.relu = torch.nn.ReLU(inplace=True)
         self.layer1 = self._make_layer(block, 16, layers[0])
         self.layer2 = self._make_layer(block, 32, layers[1], stride=2)
         self.layer3 = self._make_layer(block, 64, layers[2], stride=2)
         self.avgpool = torch.nn.AdaptiveAvgPool2d((1, 1))
         # self.bias2 = nn.Parameter(torch.zeros(1))
-        self.bias2 = GradInitBias()
-        self.fc = GradInitLinear(64, num_classes)
+        self.bias2 = Bias()
+        self.fc = torch.nn.Linear(64, num_classes)
 
         for m in self.modules():
-            if isinstance(m, GradInitConv2d):
+            if isinstance(m, torch.nn.Conv2d):
                 # torch.nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
                 # torch.nn.init.normal_(m.weight, mean=0, std=np.sqrt(
                 #     2 / (m.weight.shape[0] * np.prod(m.weight.shape[2:]))) * self.num_layers ** (-0.5))
@@ -97,7 +86,7 @@ class GradInitFixUpResNet(torch.nn.Module):
                     2 / (m.weight.shape[0] * np.prod(m.weight.shape[2:]))))
                 if m.bias is not None:
                     m.bias.data.zero_()
-            elif isinstance(m, GradInitLinear):
+            elif isinstance(m, torch.nn.Linear):
                 if m.bias is not None:
                     m.bias.data.zero_()
 
@@ -113,17 +102,6 @@ class GradInitFixUpResNet(torch.nn.Module):
             layers.append(block(planes, planes))
 
         return torch.nn.Sequential(*layers)
-
-    def gradinit(self, mode=True):
-        pass
-
-    def opt_mode(self, mode=True):
-        self.conv1.opt_mode(mode)
-        self.bias1.opt_mode(mode)
-        for layer in itertools.chain(self.layer1, self.layer2, self.layer3):
-            layer.opt_mode(mode)
-        self.bias2.opt_mode(mode)
-        self.fc.opt_mode(mode)
 
     def forward(self, x):
         x = self.conv1(x)
@@ -146,7 +124,7 @@ def fixup_resnet20(**kwargs):
     """Constructs a Fixup-ResNet-20 model.
 
     """
-    model = GradInitFixUpResNet(GradInitNoBNBasicBlock, [3, 3, 3], **kwargs)
+    model = FixUpResNet(NoBNBasicBlock, [3, 3, 3], **kwargs)
     return model
 
 
@@ -154,7 +132,7 @@ def fixup_resnet32(**kwargs):
     """Constructs a Fixup-ResNet-32 model.
 
     """
-    model = GradInitFixUpResNet(GradInitNoBNBasicBlock, [5, 5, 5], **kwargs)
+    model = FixUpResNet(NoBNBasicBlock, [5, 5, 5], **kwargs)
     return model
 
 
@@ -162,7 +140,7 @@ def fixup_resnet44(**kwargs):
     """Constructs a Fixup-ResNet-44 model.
 
     """
-    model = GradInitFixUpResNet(GradInitNoBNBasicBlock, [7, 7, 7], **kwargs)
+    model = FixUpResNet(NoBNBasicBlock, [7, 7, 7], **kwargs)
     return model
 
 
@@ -170,7 +148,7 @@ def fixup_resnet56(**kwargs):
     """Constructs a Fixup-ResNet-56 model.
 
     """
-    model = GradInitFixUpResNet(GradInitNoBNBasicBlock, [9, 9, 9], **kwargs)
+    model = FixUpResNet(NoBNBasicBlock, [9, 9, 9], **kwargs)
     return model
 
 
@@ -178,7 +156,7 @@ def fixup_resnet110(**kwargs):
     """Constructs a Fixup-ResNet-110 model.
 
     """
-    model = GradInitFixUpResNet(GradInitNoBNBasicBlock, [18, 18, 18], **kwargs)
+    model = FixUpResNet(NoBNBasicBlock, [18, 18, 18], **kwargs)
     return model
 
 
@@ -186,5 +164,5 @@ def fixup_resnet1202(**kwargs):
     """Constructs a Fixup-ResNet-1202 model.
 
     """
-    model = GradInitFixUpResNet(GradInitNoBNBasicBlock, [200, 200, 200], **kwargs)
+    model = FixUpResNet(NoBNBasicBlock, [200, 200, 200], **kwargs)
     return model    
