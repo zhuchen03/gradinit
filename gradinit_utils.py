@@ -240,7 +240,7 @@ def gradinit(net, dataloader, args):
             total_sums += 1
 
         total_iters += 1
-        if (total_sums_gnorm > 0 and total_sums_gnorm % 10 == 0) or total_iters == args.gradinit_iters or total_iters == args.gradinit_iters:
+        if (total_sums_gnorm > 0 and total_sums_gnorm % 10 == 0) or total_iters == args.gradinit_iters:
             stat_dict = get_scale_stats(net, optimizer)
             print_str = "Iter {}, obj iters {}, eta {:.3e}, constraint count {} loss: {:.3e} ({:.3e}), init loss: {:.3e} ({:.3e}), update loss {:.3e} ({:.3e}), " \
                         "total gnorm: {:.3e} ({:.3e})\t".format(
