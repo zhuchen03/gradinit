@@ -314,6 +314,8 @@ def checkpoint(acc, epoch):
 
 sgdr = CosineAnnealingLR(optimizer, args.n_epoch * len(trainloader), eta_min=0, last_epoch=-1)
 
+if not os.path.isdir('chks'):
+    os.mkdir('chks')
 chk_path = os.path.join('chks', args.expname + "_latest.pth")
 for epoch in range(start_epoch, args.n_epoch):
     lr = 0.
