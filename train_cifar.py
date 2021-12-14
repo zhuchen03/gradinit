@@ -28,7 +28,7 @@ model_names = sorted(name for name in models.__dict__
 
 parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
 parser.add_argument('-a', '--arch', metavar='ARCH', default='resnet110', choices=model_names,
-                    help='model architecture: ' + ' | '.join(model_names) + ' (default: gradinit_resnet110)')
+                    help='model architecture: ' + ' | '.join(model_names) + ' (default: resnet110)')
 parser.add_argument('--resume', default='', type=str,
                     help='resume from checkpoint')
 parser.add_argument('--seed', default=0, type=int,
