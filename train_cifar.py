@@ -27,8 +27,8 @@ model_names = sorted(name for name in models.__dict__
                      and callable(models.__dict__[name]))
 
 parser = argparse.ArgumentParser(description='PyTorch CIFAR10 Training')
-parser.add_argument('-a', '--arch', metavar='ARCH', default='gradinit_resnet110', choices=model_names,
-                    help='model architecture: ' + ' | '.join(model_names) + ' (default: gradinit_resnet110)')
+parser.add_argument('-a', '--arch', metavar='ARCH', default='resnet110', choices=model_names,
+                    help='model architecture: ' + ' | '.join(model_names) + ' (default: resnet110)')
 parser.add_argument('--resume', default='', type=str,
                     help='resume from checkpoint')
 parser.add_argument('--seed', default=0, type=int,
@@ -314,6 +314,8 @@ def checkpoint(acc, epoch):
 
 sgdr = CosineAnnealingLR(optimizer, args.n_epoch * len(trainloader), eta_min=0, last_epoch=-1)
 
+if not os.path.isdir('chks'):
+    os.mkdir('chks')
 chk_path = os.path.join('chks', args.expname + "_latest.pth")
 for epoch in range(start_epoch, args.n_epoch):
     lr = 0.
